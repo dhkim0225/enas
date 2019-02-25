@@ -16,7 +16,6 @@ import torchvision.transforms as transforms
 from torch.utils.data.sampler import SubsetRandomSampler
 
 
-
 parser = argparse.ArgumentParser("cifar10")
 parser.add_argument('--data_path', type=str, default='./data/cifar10', help='db path')
 parser.add_argument('--batch_size', type=int, default=160, help='batch size')
@@ -99,11 +98,9 @@ def main():
 
     random.seed(args.seed)
     np.random.seed(args.seed)
-    torch.cuda.set_device(args.gpu)
     torch.backends.cudnn.benchmark = True
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed(args.seed)
-    print('gpu device = %d' % args.gpu)
     print("args = %s", args)
 
     model = CNN(args)

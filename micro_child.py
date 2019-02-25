@@ -58,7 +58,7 @@ class CNN(nn.Module):
                     nn.AdaptiveAvgPool2d(1),
                 ))
                 self.add_module('aux_fc', nn.Sequential(
-                    nn.Linear(128,768),
+                    nn.Linear(128, 768),
                     nn.BatchNorm1d(768, track_running_stats=False),
                     nn.ReLU(),
                     nn.Linear(768, 10),
