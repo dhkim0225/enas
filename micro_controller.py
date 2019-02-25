@@ -42,6 +42,8 @@ class Controller(torch.nn.Module):
         anchors = list()
         anchors_w_1 = list()
         arc_seq = list()
+        entropy_list = list()
+        log_prob = list()
 
         embed = self.embed(torch.zeros(1).long().cuda())
         for layer_id in range(2):
@@ -49,9 +51,6 @@ class Controller(torch.nn.Module):
             prev_h, prev_c = h, c
             anchors.append(torch.zeros(h.shape).cuda())
             anchors_w_1.append(self.w_attn_1(h))
-
-        entropy_list = list()
-        log_prob = list()
 
         for layer_id in range(2, 7):
             prev_layers = []
@@ -92,7 +91,7 @@ class Controller(torch.nn.Module):
                 op_id = torch.multinomial(prob, 1).long().view(1)
                 ent = -torch.mean(torch.sum(F.log_softmax(logits, dim=-1) * prob, dim=1)).detach()
 
-                arc_seq[2 * i - 3] = op_id
+                arc_seq[2*i + 1] = op_id
                 log_prob.append(F.cross_entropy(logits, op_id))
                 entropy_list.append(ent)
 
