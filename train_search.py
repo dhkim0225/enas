@@ -109,7 +109,7 @@ def main():
     model = CNN(args)
     model.cuda()
 
-    controller = Controller(args)
+    controller = Controller()
     controller.cuda()
 
     optimizer = torch.optim.SGD(

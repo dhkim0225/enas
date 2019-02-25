@@ -1,38 +1,32 @@
-import numpy as np
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 
 class Controller(torch.nn.Module):
-    def __init__(self, args):
+    def __init__(self):
         torch.nn.Module.__init__(self)
 
-        self.num_branches = args.child_num_branches  # 5
-        self.num_cells = args.child_num_cells  # 5
-        self.lstm_size = args.lstm_size  # 64
-        self.lstm_num_layers = args.lstm_num_layers  # 1
-        self.lstm_keep_prob = args.lstm_keep_prob  # 0
-        self.temperature = args.temperature  #
-        self.tanh_constant = args.controller_tanh_constant
-        self.op_tanh_reduce = args.controller_op_tanh_reduce
+        self.num_branches = 5
+        self.num_cells = 5
+        self.lstm_size = 64
+        self.lstm_num_layers = 1
+        self.lstm_keep_prob = 0
+        self.temperature = 5.0
+        self.tanh_constant = 1.10
+        self.op_tanh_reduce = 2.5
 
-        self.encoder = nn.Embedding(self.num_branches+1, self.lstm_size)
+        self.embed = nn.Embedding(6, 64)
 
-        self.lstm = nn.LSTMCell(self.lstm_size, self.lstm_size)
-        self.w_soft = nn.Linear(self.lstm_size, self.num_branches, bias=False)
-        b_soft = torch.zeros(1, self.num_branches)
-        b_soft[:, 0:2] = 10
-        self.b_soft = nn.Parameter(b_soft)
-        b_soft_no_learn = np.array([0.25, 0.25] + [-0.25] * (self.num_branches-2))
-        b_soft_no_learn = np.reshape(b_soft_no_learn, [1, self.num_branches])
-        self.b_soft_no_learn = torch.Tensor(b_soft_no_learn).requires_grad_(False).cuda()
+        self.lstm = nn.LSTMCell(64, 64)
+        self.w_soft = nn.Linear(64, 5, bias=False)
+        self.b_soft = nn.Parameter([[10, 10, 0, 0, 0]])
+        self.b_soft_no_learn = torch.Tensor([[0.25, 0.25, -0.25, -0.25, -0.25]]).requires_grad_(False).cuda()
 
         # attention
-        self.w_attn_1 = nn.Linear(self.lstm_size, self.lstm_size, bias=False)
-        self.w_attn_2 = nn.Linear(self.lstm_size, self.lstm_size, bias=False)
-        self.v_attn = nn.Linear(self.lstm_size, 1, bias=False)
+        self.w_attn_1 = nn.Linear(64, 64, bias=False)
+        self.w_attn_2 = nn.Linear(64, 64, bias=False)
+        self.v_attn = nn.Linear(64, 1, bias=False)
         self.reset_param()
 
     def reset_param(self):
@@ -41,50 +35,46 @@ class Controller(torch.nn.Module):
                 nn.init.uniform_(param, -0.1, 0.1)
 
     def forward(self):
-        arc_seq_1, entropy_1, log_prob_1, c, h = self.run_sampler(use_bias=True)
-        arc_seq_2, entropy_2, log_prob_2, _, _ = self.run_sampler(prev_c=c, prev_h=h)
+        arc_seq_1, entropy_1, log_prob_1, c, h = self.sampler(use_bias=True)
+        arc_seq_2, entropy_2, log_prob_2, _, _ = self.sampler(prev_c=c, prev_h=h)
         sample_arc = (arc_seq_1, arc_seq_2)
         sample_entropy = entropy_1 + entropy_2
         sample_log_prob = log_prob_1 + log_prob_2
         return sample_arc, sample_log_prob, sample_entropy
 
-    def run_sampler(self, prev_c=None, prev_h=None, use_bias=False):
+    def sampler(self, prev_c=None, prev_h=None, use_bias=False):
         if prev_c is None:
-            prev_c = torch.zeros(1, self.lstm_size).cuda()
-            prev_h = torch.zeros(1, self.lstm_size).cuda()
+            prev_c = torch.zeros(1, 64).cuda()
+            prev_h = torch.zeros(1, 64).cuda()
 
-        inputs = self.encoder(torch.zeros(1).long().cuda())
+        anchors = list()
+        anchors_w_1 = list()
+        arc_seq = list()
 
-        anchors = []
-        anchors_w_1 = []
-        arc_seq = []
-
+        inputs = self.embed(torch.zeros(1).long().cuda())
         for layer_id in range(2):
             embed = inputs
             next_h, next_c = self.lstm(embed, (prev_h, prev_c))
-            prev_c, prev_h = next_c, next_h
+            prev_h, prev_c = next_h, next_c
             anchors.append(torch.zeros(next_h.shape).cuda())
             anchors_w_1.append(self.w_attn_1(next_h))
 
-        layer_id = 2
-        entropy = []
-        log_prob = []
+        entropy = list()
+        log_prob = list()
 
-        while layer_id < self.num_cells + 2:
+        for layer_id in range(2, 7):
             prev_layers = []
             for i in range(2):  # index_1, index_2
                 embed = inputs
                 next_h, next_c = self.lstm(embed, (prev_h, prev_c))
-                prev_c, prev_h = next_c, next_h
+                prev_h, prev_c = next_h, next_c
                 query = torch.stack(anchors_w_1[:layer_id], dim=1)
                 query = query.view(layer_id, self.lstm_size)
                 query = torch.tanh(query + self.w_attn_2(next_h))
                 query = self.v_attn(query)
                 logits = query.view(1, layer_id)
-                if self.temperature is not None:
-                    logits /= self.temperature
-                if self.tanh_constant is not None:
-                    logits = self.tanh_constant * torch.tanh(logits)
+                logits = logits/5.0 + 1.10 * torch.tanh(logits)
+
                 prob = F.softmax(logits, dim=-1)
                 index = torch.multinomial(prob, 1).long().view(1)
                 arc_seq.append(index)
@@ -116,14 +106,13 @@ class Controller(torch.nn.Module):
                 log_prob.append(curr_log_prob)
                 curr_ent = -torch.mean(torch.sum(torch.mul(F.log_softmax(logits, dim=-1), prob), dim=1)).detach()
                 entropy.append(curr_ent)
-                inputs = self.encoder(op_id+1)
+                inputs = self.embed(op_id+1)
 
             next_h, next_c = self.lstm(inputs, (prev_h, prev_c))
-            prev_c, prev_h = next_c, next_h
+            prev_h, prev_c = next_h, next_c
             anchors.append(next_h)
             anchors_w_1.append(self.w_attn_1(next_h))
-            inputs = self.encoder(torch.zeros(1).long().cuda())
-            layer_id += 1
+            inputs = self.embed(torch.zeros(1).long().cuda())
 
         arc_seq = torch.tensor(arc_seq)
         entropy = sum(entropy)
