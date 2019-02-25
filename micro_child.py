@@ -180,14 +180,14 @@ class CNN(nn.Module):
             x_id = arc[4 * cell_id]
             x_op = arc[4 * cell_id + 1]
             x = prev_layers[x_id, :, :, :, :]
-            x = self._enas_cell(x, module.cell[cell_id][0], cell_id, x_id, x_op)
+            x = self._enas_cell(x, module.cell[cell_id][0], x_id, x_op)
             x_used = torch.zeros(self.num_cells+2).long()
             x_used[x_id] = 1
 
             y_id = arc[4 * cell_id + 2]
             y_op = arc[4 * cell_id + 3]
             y = prev_layers[y_id, :, :, :, :]
-            y = self._enas_cell(y, module.cell[cell_id][1], cell_id, y_id, y_op)
+            y = self._enas_cell(y, module.cell[cell_id][1], y_id, y_op)
             y_used = torch.zeros(self.num_cells+2).long()
             y_used[y_id] = 1
 
@@ -243,7 +243,7 @@ class CNN(nn.Module):
         final_path = module.bn(final_path)
         return final_path
 
-    def _enas_cell(self, x, module, curr_cell, prev_cell, op_id):
+    def _enas_cell(self, x, module, prev_cell, op_id):
         if op_id == 0:
             out = module.three[prev_cell](x)
         elif op_id == 1:
@@ -260,7 +260,7 @@ class CNN(nn.Module):
     def reset_parameters(self):
         pass
 
-    def _init_param(self, module, trainable=True, seed=None):
+    def _init_param(self, module):
         for mod in module:
             if type(mod) == nn.Conv2d or type(mod) == nn.Linear:
                 nn.init.kaiming_normal_(mod.weight)
