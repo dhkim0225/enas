@@ -8,7 +8,7 @@ import argparse
 import torch.utils
 import torch.nn.functional as F
 
-from micro_child import CNN
+from micro_child import Child
 from micro_controller import Controller
 
 import torchvision
@@ -17,15 +17,10 @@ from torch.utils.data.sampler import SubsetRandomSampler
 
 
 parser = argparse.ArgumentParser("cifar10")
-parser.add_argument('--data_path', type=str, default='./data/cifar10', help='db path')
 parser.add_argument('--batch_size', type=int, default=160, help='batch size')
-parser.add_argument('--momentum', type=float, default=0.9, help='momentum')
 parser.add_argument('--weight_decay', type=float, default=1e-4, help='weight decay')
 parser.add_argument('--report_freq', type=float, default=10, help='report frequency')
-parser.add_argument('--gpu', type=int, default=0, help='gpu device id')
 parser.add_argument('--epochs', type=int, default=150, help='num of training epochs')
-parser.add_argument('--model_path', type=str, default='saved_models', help='path to save the model')
-parser.add_argument('--save', type=str, default='EXP', help='experiment name')
 parser.add_argument('--seed', type=int, default=2, help='random seed')
 
 parser.add_argument('--child_lr_max', type=float, default=0.05)
@@ -47,7 +42,6 @@ parser.add_argument('--lstm_num_layers', type=int, default=1)
 parser.add_argument('--lstm_keep_prob', type=float, default=0)
 parser.add_argument('--temperature', type=float, default=5.0)
 
-parser.add_argument('--entropy_weight', type=float, default=0.0001)
 parser.add_argument('--bl_dec', type=float, default=0.99)
 
 args = parser.parse_args()
@@ -55,6 +49,7 @@ args = parser.parse_args()
 CIFAR_CLASSES = 10
 
 baseline = None
+running_reward = 0
 epoch = 0
 
 print('==> Preparing data..')
@@ -98,30 +93,26 @@ def main():
 
     random.seed(args.seed)
     np.random.seed(args.seed)
-    torch.backends.cudnn.benchmark = True
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed(args.seed)
-    print("args = %s", args)
+    torch.backends.cudnn.benchmark = True
 
-    model = CNN(args)
+    print("args = %s", args)
+    model = Child(args)
     model.cuda()
 
     controller = Controller()
     controller.cuda()
 
-    optimizer = torch.optim.SGD(
-        model.parameters(),
-        args.child_lr_max,
-        momentum=args.momentum,
-        weight_decay=args.weight_decay,
-    )
+    optimizer = torch.optim.SGD(model.parameters(),
+                                lr=0.05,
+                                momentum=0.9,
+                                weight_decay=1e-4)
 
-    controller_optimizer = torch.optim.Adam(
-        controller.parameters(),
-        args.controller_lr,
-        betas=(0.1, 0.999),
-        eps=1e-3,
-    )
+    controller_optimizer = torch.optim.Adam(controller.parameters(),
+                                            lr=0.0035,
+                                            betas=(0.1, 0.999),
+                                            eps=1e-3)
 
     scheduler = utils.LRScheduler(optimizer, args)
 
@@ -137,7 +128,7 @@ def main():
         # validation
         valid_acc = infer(model, controller)
         print('valid_acc', valid_acc)
-        torch.save(model.state_dict(), os.path.join(args.save, 'weights.pth'))
+        torch.save(model.state_dict(), 'weights.pth')
 
 
 def train(model, controller, optimizer):
@@ -166,7 +157,7 @@ def train(model, controller, optimizer):
         total_loss.update(loss.item(), n)
         total_top1.update(prec1.item(), n)
 
-        if step % args.report_freq == 0:
+        if step % 10 == 0:
             print('train step=', step,
                   'total_loss=', round(total_loss.avg, 4),
                   'acc=', round(total_top1.avg, 4))
@@ -175,7 +166,7 @@ def train(model, controller, optimizer):
 
 
 def train_controller(model, controller, controller_optimizer):
-    global baseline
+    # global baseline
     total_loss = utils.AvgMeter()
     total_reward = utils.AvgMeter()
     total_entropy = utils.AvgMeter()
@@ -202,16 +193,25 @@ def train_controller(model, controller, controller_optimizer):
             logits, _ = model(data, dag)
             reward = utils.accuracy(logits, target)[0]
 
-        if args.entropy_weight is not None:
-            reward += args.entropy_weight*entropy
-
+        global running_reward
+        running_reward = 0.99 * running_reward + 0.01 * reward
+        baseline = running_reward
         log_prob = torch.sum(log_prob)
-        if baseline is None:
-            baseline = reward
-        baseline -= (1 - args.bl_dec) * (baseline - reward)
+        # entropy = torch.cat(entropy_seq, dim=0).sum()
 
-        loss = log_prob * (reward - baseline)
-        loss = loss.sum()
+        loss = - log_prob * (reward - baseline)
+        loss = loss - 0.0001 * entropy.detach()
+        #
+        # reward += 0.0001*entropy
+        #
+        # log_prob = torch.sum(log_prob)
+        # if baseline is None:
+        #     baseline = reward
+        #
+        # baseline += 0.01 * (reward - baseline)
+        #
+        # loss = log_prob * (reward - baseline)
+        # loss = loss.sum()
 
         loss.backward()
 
@@ -236,7 +236,7 @@ def infer(model, controller):
 
     with torch.no_grad():
         test_iterator = iter(test_loader)
-        for step in range(300):
+        for step in range(10):
             try:
                 data, target = next(test_iterator)
             except StopIteration:

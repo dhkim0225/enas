@@ -3,9 +3,9 @@ from torch import nn
 import torch.nn.functional as F
 
 
-class CNN(nn.Module):
+class Child(nn.Module):
     def __init__(self, args):
-        super(CNN, self).__init__()
+        super(Child, self).__init__()
 
         self.num_layers = args.child_num_layers
         self.out_filters = args.child_out_filters
