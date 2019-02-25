@@ -183,10 +183,10 @@ def train_controller(model, controller, controller_optimizer):
     valid_iterator = iter(valid_loader)
     for step in range(300):
         try:
-            data, targets = next(valid_iterator)
+            data, target = next(valid_iterator)
         except StopIteration:
             valid_iterator = iter(valid_loader)
-            data, targets = next(valid_iterator)
+            data, target = next(valid_iterator)
 
         model.eval()
         n = data.size(0)
@@ -195,7 +195,6 @@ def train_controller(model, controller, controller_optimizer):
         target = target.cuda()
 
         controller_optimizer.zero_grad()
-
         controller.train()
         dag, log_prob, entropy = controller()
 
@@ -239,10 +238,10 @@ def infer(model, controller):
         test_iterator = iter(test_loader)
         for step in range(300):
             try:
-                data, targets = next(test_iterator)
+                data, target = next(test_iterator)
             except StopIteration:
                 test_iterator = iter(test_loader)
-                data, targets = next(test_iterator)
+                data, target = next(test_iterator)
 
             data = data.cuda()
             target = target.cuda()

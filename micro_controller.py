@@ -53,7 +53,6 @@ class Controller(torch.nn.Module):
             anchors_w_1.append(self.w_attn_1(h))
 
         for layer_id in range(2, 7):
-            prev_layers = []
             for i in range(2):  # index_1, index_2
                 h, c = self.lstm(embed, (prev_h, prev_c))
                 prev_h, prev_c = h, c
@@ -72,10 +71,9 @@ class Controller(torch.nn.Module):
                 arc_seq.append(index)
                 arc_seq.append(0)
                 entropy_list.append(ent)
-                prev_layers.append(anchors[index])
 
                 # update input
-                embed = prev_layers[-1].view(1, -1).requires_grad_()
+                embed = anchors[index].clone().view(1, -1).requires_grad_()
 
             for i in range(2):  # op_1, op_2
                 h, c = self.lstm(embed, (prev_h, prev_c))
