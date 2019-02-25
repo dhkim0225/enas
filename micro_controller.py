@@ -90,8 +90,7 @@ class Controller(torch.nn.Module):
                 prob = F.softmax(logits, dim=-1)
                 op_id = torch.multinomial(prob, 1).long().view(1)
                 ent = -torch.mean(torch.sum(F.log_softmax(logits, dim=-1) * prob, dim=1)).detach()
-
-                arc_seq[2*i + 1] = op_id
+                arc_seq[2*i - 3] = op_id
                 log_prob.append(F.cross_entropy(logits, op_id))
                 entropy_list.append(ent)
 
