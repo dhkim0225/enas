@@ -7,17 +7,7 @@ class Controller(torch.nn.Module):
     def __init__(self):
         torch.nn.Module.__init__(self)
 
-        self.num_branches = 5
-        self.num_cells = 5
-        self.lstm_size = 64
-        self.lstm_num_layers = 1
-        self.lstm_keep_prob = 0
-        self.temperature = 5.0
-        self.tanh_constant = 1.10
-        self.op_tanh_reduce = 2.5
-
         self.embed = nn.Embedding(6, 64)
-
         self.lstm = nn.LSTMCell(64, 64)
         self.w_soft = nn.Linear(64, 5, bias=False)
         self.b_soft = nn.Parameter([[10, 10, 0, 0, 0]])
@@ -37,9 +27,11 @@ class Controller(torch.nn.Module):
     def forward(self):
         arc_seq_1, entropy_1, log_prob_1, c, h = self.sampler(use_bias=True)
         arc_seq_2, entropy_2, log_prob_2, _, _ = self.sampler(prev_c=c, prev_h=h)
+
         sample_arc = (arc_seq_1, arc_seq_2)
-        sample_entropy = entropy_1 + entropy_2
         sample_log_prob = log_prob_1 + log_prob_2
+        sample_entropy = entropy_1 + entropy_2
+
         return sample_arc, sample_log_prob, sample_entropy
 
     def sampler(self, prev_c=None, prev_h=None, use_bias=False):
@@ -79,8 +71,7 @@ class Controller(torch.nn.Module):
                 index = torch.multinomial(prob, 1).long().view(1)
                 arc_seq.append(index)
                 arc_seq.append(0)
-                curr_log_prob = F.cross_entropy(logits, index)
-                log_prob.append(curr_log_prob)
+                log_prob.append(F.cross_entropy(logits, index))
                 curr_ent = -torch.mean(torch.sum(torch.mul(F.log_softmax(logits, dim=-1), prob), dim=1)).detach()
 
                 entropy.append(curr_ent)
@@ -91,22 +82,19 @@ class Controller(torch.nn.Module):
                 embed = inputs
                 next_h, next_c = self.lstm(embed, (prev_h, prev_c))
                 prev_c, prev_h = next_c, next_h
+
                 logits = self.w_soft(next_h) + self.b_soft.requires_grad_()
-                if self.temperature is not None:
-                    logits /= self.temperature
-                if self.tanh_constant is not None:
-                    op_tanh = self.tanh_constant / self.op_tanh_reduce
-                    logits = op_tanh * torch.tanh(logits)
+                logits = (1.10 / 2.5) * torch.tanh(logits / 5.0)
                 if use_bias:
                     logits += self.b_soft_no_learn
                 prob = F.softmax(logits, dim=-1)
+
                 op_id = torch.multinomial(prob, 1).long().view(1)
-                arc_seq[2*i-3] = op_id
-                curr_log_prob = F.cross_entropy(logits, op_id)
-                log_prob.append(curr_log_prob)
+                arc_seq[2*i - 3] = op_id
+                log_prob.append(F.cross_entropy(logits, op_id))
                 curr_ent = -torch.mean(torch.sum(torch.mul(F.log_softmax(logits, dim=-1), prob), dim=1)).detach()
                 entropy.append(curr_ent)
-                inputs = self.embed(op_id+1)
+                inputs = self.embed(op_id + 1)
 
             next_h, next_c = self.lstm(inputs, (prev_h, prev_c))
             prev_h, prev_c = next_h, next_c
@@ -117,8 +105,7 @@ class Controller(torch.nn.Module):
         arc_seq = torch.tensor(arc_seq)
         entropy = sum(entropy)
         log_prob = sum(log_prob)
-        last_c = next_c
-        last_h = next_h
+        last_h, last_c = next_h, next_c
 
         return arc_seq, entropy, log_prob, last_c, last_h
 
